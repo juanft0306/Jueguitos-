@@ -1,21 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>BroTato JS</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            overflow: hidden; 
+            background: #0a0a15; 
+            touch-action: none;
+            font-family: Arial, sans-serif;
+        }
+        canvas { 
+            display: block; 
+            width: 100vw; 
+            height: 100vh; 
+            background: #0a0a15; 
+        }
+        #ui {
+            position: absolute; 
+            top: 10px; 
+            left: 0; 
+            width: 100%; 
+            pointer-events: none;
+            color: white; 
+            font-size: 16px; 
+            text-align: center;
+            text-shadow: 1px 1px 4px rgba(0,0,0,0.8);
+            z-index: 10;
+        }
+        #ui span { 
+            background: rgba(0,0,0,0.6); 
+            padding: 4px 12px; 
+            border-radius: 8px; 
+            margin: 0 5px;
+            display: inline-block;
+        }
+        #ui .vida { color: #ff6b6b; }
+        #ui .puntos { color: #ffd93d; }
+        #ui .oleada { color: #6bcbff; }
+        
+        #debug {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: rgba(255,255,255,0.3);
+            font-size: 12px;
+            pointer-events: none;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="game"></canvas>
+    <div id="ui">
+        <span class="puntos">🏆 <span id="puntos">0</span></span>
+        <span class="oleada">🌊 <span id="oleada">1</span></span>
+        <span class="vida">❤️ <span id="vida">10</span></span>
+    </div>
+    <div id="debug">Cargando...</div>
+</body>
+</html>
 <script>
 // ============================================
-// BLOQUE 1: CONFIGURACIÓN, CLASES Y ESTADO
+// BLOQUE 2: CONFIGURACIÓN, CLASES Y ESTADO
 // ============================================
 
-// --- CONFIGURACIÓN INICIAL ---
+console.log('🧩 Bloque 2 cargando...');
+
+// --- CONFIGURACIÓN ---
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
+const debug = document.getElementById('debug');
 let W, H;
 
 function resize() {
     W = canvas.width = window.innerWidth;
     H = canvas.height = window.innerHeight;
+    debug.textContent = `📐 ${W}x${H}`;
 }
 window.addEventListener('resize', resize);
 resize();
 
-// Elementos UI
+// --- UI ---
 const uiPuntos = document.getElementById('puntos');
 const uiOleada = document.getElementById('oleada');
 const uiVida = document.getElementById('vida');
@@ -43,10 +111,9 @@ class Enemigo {
         this.y = y;
         this.radio = 16;
         this.vida = 2;
-        this.velocidad = 1.5 + oleada * 0.2;
+        this.velocidad = 1.5 + (window.oleada || 1) * 0.2;
         this.daño = 1;
         this.color = `hsl(${Math.random() * 60 + 340}, 70%, 50%)`;
-        this.tiempoVida = 0;
     }
 }
 
@@ -123,6 +190,7 @@ function iniciarOleada() {
     enemigosPorOleada = 5 + (oleada - 1) * 3;
     enemigosRestantes = enemigosPorOleada;
     intervaloSpawm = Math.max(15, 30 - oleada * 2);
+    debug.textContent = `🌊 Oleada ${oleada} - Enemigos: ${enemigosRestantes}`;
 }
 
 function generarMejoras() {
@@ -154,6 +222,7 @@ function aplicarMejora(indice) {
     }
     pausaMejoras = false;
     iniciarOleada();
+    mostrarMensaje(`✅ ${m.emoji} ${m.nombre}`);
 }
 
 function reiniciarJuego() {
@@ -168,6 +237,7 @@ function reiniciarJuego() {
     mensaje = '';
     tiempoMensaje = 0;
     iniciarOleada();
+    debug.textContent = '🔄 Reiniciado';
 }
 
 function mostrarMensaje(msg) {
@@ -193,13 +263,16 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
     };
 }
 
-console.log('✅ Bloque 1 cargado');
+console.log('✅ Bloque 2 cargado');
+</script>
 <script>
 // ============================================
-// BLOQUE 2: BUCLE PRINCIPAL Y EVENTOS
+// BLOQUE 3: BUCLE PRINCIPAL Y EVENTOS
 // ============================================
 
-// --- ACTUALIZAR LÓGICA ---
+console.log('🎮 Bloque 3 cargando...');
+
+// --- ACTUALIZAR ---
 function actualizar() {
     if (gameOver || pausaMejoras) return;
 
@@ -316,7 +389,7 @@ function actualizar() {
         }
         if (Math.hypot(jugador.x - m.x, jugador.y - m.y) < jugador.radio + m.radio) {
             if (m.tipo === 'moneda') {
-                // Monedas como recurso (para futura tienda)
+                // Monedas (reservado para futura tienda)
             } else {
                 puntuacion += 5;
             }
@@ -331,6 +404,7 @@ function actualizar() {
         generarMejoras();
         balas = [];
         mostrarMensaje(`🌊 ¡Oleada ${oleada - 1} completada!`);
+        debug.textContent = `🏆 Oleada ${oleada} completada`;
     }
 
     // 9. UI
@@ -345,7 +419,7 @@ function actualizar() {
 function dibujar() {
     ctx.clearRect(0, 0, W, H);
 
-    // Fondo
+    // Fondo con cuadrícula
     ctx.strokeStyle = 'rgba(50,50,80,0.3)';
     ctx.lineWidth = 1;
     for (let x = 0; x < W; x += 40) {
@@ -392,6 +466,7 @@ function dibujar() {
         ctx.strokeStyle = 'rgba(255,255,255,0.5)';
         ctx.lineWidth = 2;
         ctx.stroke();
+        // Ojos
         ctx.fillStyle = 'white';
         ctx.beginPath();
         ctx.arc(e.x - 6, e.y - 5, 5, 0, Math.PI * 2);
@@ -406,6 +481,7 @@ function dibujar() {
         ctx.beginPath();
         ctx.arc(e.x + 4, e.y - 7, 2.5, 0, Math.PI * 2);
         ctx.fill();
+        // Barra de vida
         if (e.vida > 1) {
             const ancho = e.radio * 2;
             ctx.fillStyle = 'rgba(255,0,0,0.8)';
@@ -441,6 +517,7 @@ function dibujar() {
     ctx.strokeStyle = '#1a8a4a';
     ctx.lineWidth = 3;
     ctx.stroke();
+    // Línea de mira
     ctx.strokeStyle = 'white';
     ctx.lineWidth = 3;
     ctx.beginPath();
@@ -450,6 +527,7 @@ function dibujar() {
         jugador.y + Math.sin(jugador.angulo) * 40
     );
     ctx.stroke();
+    // Ojos
     ctx.fillStyle = 'white';
     ctx.beginPath();
     ctx.arc(jugador.x - 6, jugador.y - 5, 5, 0, Math.PI * 2);
@@ -465,7 +543,7 @@ function dibujar() {
     ctx.arc(jugador.x + 4, jugador.y - 7, 2.5, 0, Math.PI * 2);
     ctx.fill();
 
-    // Radio de ataque
+    // Radio de ataque (sutil)
     ctx.strokeStyle = 'rgba(255,255,255,0.05)';
     ctx.lineWidth = 1;
     ctx.setLineDash([5, 5]);
@@ -489,7 +567,7 @@ function dibujar() {
         ctx.globalAlpha = 1;
     }
 
-    // Mejoras
+    // Pantalla de mejoras
     if (pausaMejoras && !gameOver) {
         ctx.fillStyle = 'rgba(0,0,0,0.7)';
         ctx.fillRect(0, 0, W, H);
@@ -544,7 +622,7 @@ function dibujar() {
         ctx.fillText('Toca la pantalla o presiona R para reiniciar', W/2, H/2 + 100);
     }
 
-    // Controles
+    // Controles (solo al inicio)
     if (!gameOver && !pausaMejoras && puntuacion < 50) {
         const alpha = Math.max(0, 1 - puntuacion / 50);
         ctx.globalAlpha = alpha;
@@ -642,9 +720,11 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-// --- INICIALIZAR Y EJECUTAR ---
+// --- INICIALIZAR ---
 iniciarOleada();
+console.log('✅ Juego iniciado');
 
+// --- BUCLE PRINCIPAL ---
 function loop() {
     actualizar();
     dibujar();
@@ -652,6 +732,20 @@ function loop() {
 }
 loop();
 
-console.log('✅ Bloque 2 cargado');
+console.log('✅ Bloque 3 cargado - ¡Juego listo!');
 </script>
-  
+<!DOCTYPE html>
+<html>
+<head> ... </head>
+<body>
+    <canvas id="game"></canvas>
+    <div id="ui"> ... </div>
+    <div id="debug"> ... </div>
+    
+    <!-- BLOQUE 2: Configuración, Clases y Estado -->
+    <script> ... </script>
+    
+    <!-- BLOQUE 3: Lógica y Eventos -->
+    <script> ... </script>
+</body>
+</html>
