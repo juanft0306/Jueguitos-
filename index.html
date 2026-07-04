@@ -1,0 +1,657 @@
+<script>
+// ============================================
+// BLOQUE 1: CONFIGURACIÓN, CLASES Y ESTADO
+// ============================================
+
+// --- CONFIGURACIÓN INICIAL ---
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Elementos UI
+const uiPuntos = document.getElementById('puntos');
+const uiOleada = document.getElementById('oleada');
+const uiVida = document.getElementById('vida');
+
+// --- CLASES ---
+class Jugador {
+    constructor() {
+        this.x = W/2;
+        this.y = H/2;
+        this.radio = 18;
+        this.angulo = 0;
+        this.vida = 10;
+        this.vidaMax = 10;
+        this.velocidad = 5;
+        this.daño = 1;
+        this.rango = 180;
+        this.velAtaque = 10;
+        this.cooldown = 0;
+    }
+}
+
+class Enemigo {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.radio = 16;
+        this.vida = 2;
+        this.velocidad = 1.5 + oleada * 0.2;
+        this.daño = 1;
+        this.color = `hsl(${Math.random() * 60 + 340}, 70%, 50%)`;
+        this.tiempoVida = 0;
+    }
+}
+
+class Bala {
+    constructor(x, y, angulo) {
+        this.x = x;
+        this.y = y;
+        this.vel = 8;
+        this.vx = Math.cos(angulo) * this.vel;
+        this.vy = Math.sin(angulo) * this.vel;
+        this.radio = 5;
+        this.daño = 1;
+        this.vida = 60;
+    }
+}
+
+class Material {
+    constructor(x, y, tipo = 'xp') {
+        this.x = x;
+        this.y = y;
+        this.radio = 8;
+        this.tipo = tipo;
+        this.vida = 300;
+        this.color = tipo === 'moneda' ? '#ffd700' : '#4ecdc4';
+    }
+}
+
+class Mejora {
+    constructor(nombre, tipo, valor, emoji) {
+        this.nombre = nombre;
+        this.tipo = tipo;
+        this.valor = valor;
+        this.emoji = emoji;
+    }
+}
+
+// --- ESTADO DEL JUEGO ---
+let jugador = new Jugador();
+let enemigos = [];
+let balas = [];
+let materiales = [];
+let puntuacion = 0;
+let oleada = 1;
+let enemigosRestantes = 0;
+let enemigosPorOleada = 5;
+let contadorSpawn = 0;
+let intervaloSpawm = 30;
+let gameOver = false;
+let pausaMejoras = false;
+let mejorasDisponibles = [];
+let mensaje = '';
+let tiempoMensaje = 0;
+
+// Estado táctil
+let touchStart = null;
+let touchCurrent = null;
+const ZONA_MUERTA = 8;
+const RADIO_MAX = 120;
+
+// --- FUNCIONES AUXILIARES ---
+function spawnEnemigo() {
+    if (enemigosRestantes <= 0) return;
+    const lado = Math.floor(Math.random() * 4);
+    let x, y;
+    if (lado === 0) { x = Math.random() * W; y = -30; }
+    else if (lado === 1) { x = Math.random() * W; y = H + 30; }
+    else if (lado === 2) { x = -30; y = Math.random() * H; }
+    else { x = W + 30; y = Math.random() * H; }
+    enemigos.push(new Enemigo(x, y));
+    enemigosRestantes--;
+}
+
+function iniciarOleada() {
+    enemigosPorOleada = 5 + (oleada - 1) * 3;
+    enemigosRestantes = enemigosPorOleada;
+    intervaloSpawm = Math.max(15, 30 - oleada * 2);
+}
+
+function generarMejoras() {
+    const opciones = [
+        new Mejora('Vida +1', 'vida', 1, '❤️'),
+        new Mejora('Daño +1', 'daño', 1, '⚔️'),
+        new Mejora('Velocidad +0.5', 'velocidad', 0.5, '💨'),
+        new Mejora('Rango +15', 'rango', 15, '🏹'),
+        new Mejora('Cadencia -2', 'velAtaque', -2, '🔥'),
+    ];
+    const shuffled = opciones.sort(() => Math.random() - 0.5);
+    mejorasDisponibles = shuffled.slice(0, 3);
+}
+
+function aplicarMejora(indice) {
+    if (indice >= mejorasDisponibles.length) return;
+    const m = mejorasDisponibles[indice];
+    if (m.tipo === 'vida') {
+        jugador.vidaMax += m.valor;
+        jugador.vida = Math.min(jugador.vida + m.valor, jugador.vidaMax);
+    } else if (m.tipo === 'daño') {
+        jugador.daño += m.valor;
+    } else if (m.tipo === 'velocidad') {
+        jugador.velocidad += m.valor;
+    } else if (m.tipo === 'rango') {
+        jugador.rango += m.valor;
+    } else if (m.tipo === 'velAtaque') {
+        jugador.velAtaque = Math.max(2, jugador.velAtaque + m.valor);
+    }
+    pausaMejoras = false;
+    iniciarOleada();
+}
+
+function reiniciarJuego() {
+    jugador = new Jugador();
+    enemigos = [];
+    balas = [];
+    materiales = [];
+    puntuacion = 0;
+    oleada = 1;
+    gameOver = false;
+    pausaMejoras = false;
+    mensaje = '';
+    tiempoMensaje = 0;
+    iniciarOleada();
+}
+
+function mostrarMensaje(msg) {
+    mensaje = msg;
+    tiempoMensaje = 90;
+}
+
+// --- POLYFILL para roundRect ---
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        if (r > w/2) r = w/2;
+        if (r > h/2) r = h/2;
+        this.moveTo(x + r, y);
+        this.lineTo(x + w - r, y);
+        this.quadraticCurveTo(x + w, y, x + w, y + r);
+        this.lineTo(x + w, y + h - r);
+        this.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        this.lineTo(x + r, y + h);
+        this.quadraticCurveTo(x, y + h, x, y + h - r);
+        this.lineTo(x, y + r);
+        this.quadraticCurveTo(x, y, x + r, y);
+        return this;
+    };
+}
+
+console.log('✅ Bloque 1 cargado');
+<script>
+// ============================================
+// BLOQUE 2: BUCLE PRINCIPAL Y EVENTOS
+// ============================================
+
+// --- ACTUALIZAR LÓGICA ---
+function actualizar() {
+    if (gameOver || pausaMejoras) return;
+
+    // 1. Movimiento
+    if (touchStart && touchCurrent) {
+        const dx = touchCurrent.x - touchStart.x;
+        const dy = touchCurrent.y - touchStart.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > ZONA_MUERTA) {
+            const factor = Math.min(dist / RADIO_MAX, 1);
+            const vel = jugador.velocidad * factor;
+            jugador.x += (dx / dist) * vel;
+            jugador.y += (dy / dist) * vel;
+            jugador.angulo = Math.atan2(dy, dx);
+        }
+    }
+
+    // 2. Bordes
+    jugador.x = Math.max(jugador.radio, Math.min(W - jugador.radio, jugador.x));
+    jugador.y = Math.max(jugador.radio, Math.min(H - jugador.radio, jugador.y));
+
+    // 3. Disparo
+    let enemigoCercano = null;
+    let distMin = jugador.rango;
+    for (const e of enemigos) {
+        const d = Math.hypot(e.x - jugador.x, e.y - jugador.y);
+        if (d < distMin) {
+            distMin = d;
+            enemigoCercano = e;
+        }
+    }
+    if (enemigoCercano) {
+        jugador.angulo = Math.atan2(enemigoCercano.y - jugador.y, enemigoCercano.x - jugador.x);
+        jugador.cooldown--;
+        if (jugador.cooldown <= 0) {
+            jugador.cooldown = jugador.velAtaque;
+            balas.push(new Bala(
+                jugador.x + Math.cos(jugador.angulo) * 30,
+                jugador.y + Math.sin(jugador.angulo) * 30,
+                jugador.angulo
+            ));
+        }
+    } else {
+        jugador.cooldown = 0;
+    }
+
+    // 4. Spawn enemigos
+    if (enemigosRestantes > 0) {
+        contadorSpawn++;
+        if (contadorSpawn >= intervaloSpawm) {
+            contadorSpawn = 0;
+            spawnEnemigo();
+        }
+    }
+
+    // 5. Mover enemigos
+    for (const e of enemigos) {
+        const dx = jugador.x - e.x;
+        const dy = jugador.y - e.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 0 && dist < 350) {
+            e.x += (dx / dist) * e.velocidad;
+            e.y += (dy / dist) * e.velocidad;
+        }
+        if (dist < jugador.radio + e.radio) {
+            jugador.vida -= e.daño;
+            enemigos.splice(enemigos.indexOf(e), 1);
+            if (jugador.vida <= 0) {
+                gameOver = true;
+                mostrarMensaje('💀 Game Over');
+            }
+        }
+    }
+
+    // 6. Balas
+    for (let i = balas.length - 1; i >= 0; i--) {
+        const b = balas[i];
+        b.x += b.vx;
+        b.y += b.vy;
+        b.vida--;
+        if (b.vida <= 0 || b.x < -50 || b.x > W + 50 || b.y < -50 || b.y > H + 50) {
+            balas.splice(i, 1);
+            continue;
+        }
+        let hit = false;
+        for (let j = enemigos.length - 1; j >= 0; j--) {
+            const e = enemigos[j];
+            if (Math.hypot(b.x - e.x, b.y - e.y) < b.radio + e.radio) {
+                e.vida -= b.daño;
+                balas.splice(i, 1);
+                if (e.vida <= 0) {
+                    enemigos.splice(j, 1);
+                    puntuacion += 10;
+                    if (Math.random() < 0.2) {
+                        materiales.push(new Material(e.x, e.y, 'moneda'));
+                    } else {
+                        materiales.push(new Material(e.x, e.y, 'xp'));
+                    }
+                }
+                hit = true;
+                break;
+            }
+        }
+        if (hit) continue;
+    }
+
+    // 7. Materiales
+    for (let i = materiales.length - 1; i >= 0; i--) {
+        const m = materiales[i];
+        m.vida--;
+        if (m.vida <= 0) {
+            materiales.splice(i, 1);
+            continue;
+        }
+        if (Math.hypot(jugador.x - m.x, jugador.y - m.y) < jugador.radio + m.radio) {
+            if (m.tipo === 'moneda') {
+                // Monedas como recurso (para futura tienda)
+            } else {
+                puntuacion += 5;
+            }
+            materiales.splice(i, 1);
+        }
+    }
+
+    // 8. Fin de oleada
+    if (enemigos.length === 0 && enemigosRestantes === 0) {
+        pausaMejoras = true;
+        oleada++;
+        generarMejoras();
+        balas = [];
+        mostrarMensaje(`🌊 ¡Oleada ${oleada - 1} completada!`);
+    }
+
+    // 9. UI
+    uiPuntos.textContent = Math.floor(puntuacion);
+    uiOleada.textContent = oleada;
+    uiVida.textContent = Math.floor(jugador.vida);
+
+    if (tiempoMensaje > 0) tiempoMensaje--;
+}
+
+// --- DIBUJAR ---
+function dibujar() {
+    ctx.clearRect(0, 0, W, H);
+
+    // Fondo
+    ctx.strokeStyle = 'rgba(50,50,80,0.3)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < W; x += 40) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, H);
+        ctx.stroke();
+    }
+    for (let y = 0; y < H; y += 40) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+        ctx.stroke();
+    }
+
+    // Materiales
+    for (const m of materiales) {
+        ctx.shadowColor = m.color;
+        ctx.shadowBlur = 10;
+        ctx.fillStyle = m.color;
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, m.radio, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = 'white';
+        ctx.font = '14px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(m.tipo === 'moneda' ? '🪙' : '✨', m.x, m.y);
+    }
+
+    // Enemigos
+    for (const e of enemigos) {
+        ctx.shadowColor = e.color;
+        ctx.shadowBlur = 15;
+        ctx.fillStyle = e.color;
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.radio, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        ctx.fillStyle = 'white';
+        ctx.beginPath();
+        ctx.arc(e.x - 6, e.y - 5, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(e.x + 6, e.y - 5, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#222';
+        ctx.beginPath();
+        ctx.arc(e.x - 8, e.y - 7, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(e.x + 4, e.y - 7, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+        if (e.vida > 1) {
+            const ancho = e.radio * 2;
+            ctx.fillStyle = 'rgba(255,0,0,0.8)';
+            ctx.fillRect(e.x - ancho/2, e.y - e.radio - 10, ancho, 4);
+            ctx.fillStyle = 'rgba(0,255,0,0.8)';
+            ctx.fillRect(e.x - ancho/2, e.y - e.radio - 10, ancho * (e.vida / 3), 4);
+        }
+    }
+
+    // Balas
+    for (const b of balas) {
+        ctx.shadowColor = '#ffd700';
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = '#ffd700';
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.radio, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'white';
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.radio/2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Jugador
+    ctx.shadowColor = '#2ecc71';
+    ctx.shadowBlur = 20;
+    ctx.fillStyle = '#2ecc71';
+    ctx.beginPath();
+    ctx.arc(jugador.x, jugador.y, jugador.radio, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = '#1a8a4a';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(jugador.x, jugador.y);
+    ctx.lineTo(
+        jugador.x + Math.cos(jugador.angulo) * 40,
+        jugador.y + Math.sin(jugador.angulo) * 40
+    );
+    ctx.stroke();
+    ctx.fillStyle = 'white';
+    ctx.beginPath();
+    ctx.arc(jugador.x - 6, jugador.y - 5, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(jugador.x + 6, jugador.y - 5, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.beginPath();
+    ctx.arc(jugador.x - 8, jugador.y - 7, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(jugador.x + 4, jugador.y - 7, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Radio de ataque
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.arc(jugador.x, jugador.y, jugador.rango, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Mensaje
+    if (tiempoMensaje > 0 && mensaje) {
+        const alpha = Math.min(1, tiempoMensaje / 30);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.roundRect(W/2 - 150, 60, 300, 40, 8);
+        ctx.fill();
+        ctx.fillStyle = 'white';
+        ctx.font = '20px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(mensaje, W/2, 80);
+        ctx.globalAlpha = 1;
+    }
+
+    // Mejoras
+    if (pausaMejoras && !gameOver) {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#ffd700';
+        ctx.font = 'bold 30px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🌊 ¡OLEADA COMPLETADA!', W/2, H/2 - 120);
+        ctx.fillStyle = 'white';
+        ctx.font = '22px Arial';
+        ctx.fillText('Elige una mejora:', W/2, H/2 - 70);
+        for (let i = 0; i < mejorasDisponibles.length; i++) {
+            const m = mejorasDisponibles[i];
+            const bx = W/2 + (i - 1) * 160;
+            const by = H/2 + 20;
+            ctx.fillStyle = 'rgba(60,60,90,0.9)';
+            ctx.roundRect(bx - 70, by - 25, 140, 50, 10);
+            ctx.fill();
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2;
+            ctx.roundRect(bx - 70, by - 25, 140, 50, 10);
+            ctx.stroke();
+            ctx.fillStyle = 'white';
+            ctx.font = '18px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`${m.emoji} ${m.nombre}`, bx, by);
+            ctx.font = '14px Arial';
+            ctx.fillStyle = '#aaa';
+            ctx.fillText(`[${i+1}]`, bx, by + 30);
+        }
+        ctx.fillStyle = '#888';
+        ctx.font = '16px Arial';
+        ctx.fillText('Toca la mejora o presiona 1-3', W/2, H/2 + 100);
+    }
+
+    // Game Over
+    if (gameOver) {
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#e74c3c';
+        ctx.font = 'bold 50px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('💀 GAME OVER', W/2, H/2 - 60);
+        ctx.fillStyle = 'white';
+        ctx.font = '24px Arial';
+        ctx.fillText(`Puntuación: ${Math.floor(puntuacion)}`, W/2, H/2);
+        ctx.fillText(`Oleada: ${oleada - 1}`, W/2, H/2 + 40);
+        ctx.fillStyle = '#888';
+        ctx.font = '18px Arial';
+        ctx.fillText('Toca la pantalla o presiona R para reiniciar', W/2, H/2 + 100);
+    }
+
+    // Controles
+    if (!gameOver && !pausaMejoras && puntuacion < 50) {
+        const alpha = Math.max(0, 1 - puntuacion / 50);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.roundRect(W/2 - 150, H - 60, 300, 35, 8);
+        ctx.fill();
+        ctx.fillStyle = 'white';
+        ctx.font = '16px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('👆 Toca y arrastra para mover', W/2, H - 43);
+        ctx.globalAlpha = 1;
+    }
+}
+
+// --- EVENTOS ---
+// Ratón
+canvas.addEventListener('mousedown', (e) => {
+    if (gameOver) { reiniciarJuego(); return; }
+    if (pausaMejoras) {
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        for (let i = 0; i < mejorasDisponibles.length; i++) {
+            const bx = W/2 + (i - 1) * 160;
+            const by = H/2 + 20;
+            if (Math.abs(mx - bx) < 70 && Math.abs(my - by) < 25) {
+                aplicarMejora(i);
+                return;
+            }
+        }
+        return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    touchStart = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    touchCurrent = { ...touchStart };
+});
+canvas.addEventListener('mousemove', (e) => {
+    if (e.buttons === 0) return;
+    const rect = canvas.getBoundingClientRect();
+    touchCurrent = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+});
+canvas.addEventListener('mouseup', () => { touchStart = null; touchCurrent = null; });
+canvas.addEventListener('mouseleave', () => { touchStart = null; touchCurrent = null; });
+
+// Táctil
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (gameOver) { reiniciarJuego(); return; }
+    if (pausaMejoras) {
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const mx = touch.clientX - rect.left;
+        const my = touch.clientY - rect.top;
+        for (let i = 0; i < mejorasDisponibles.length; i++) {
+            const bx = W/2 + (i - 1) * 160;
+            const by = H/2 + 20;
+            if (Math.abs(mx - bx) < 70 && Math.abs(my - by) < 25) {
+                aplicarMejora(i);
+                return;
+            }
+        }
+        return;
+    }
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    touchStart = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+    touchCurrent = { ...touchStart };
+}, { passive: false });
+canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (e.touches.length === 0) return;
+    const touch = e.touches[0];
+    const rect = canvas.getBoundingClientRect();
+    touchCurrent = { x: touch.clientX - rect.left, y: touch.clientY - rect.top };
+}, { passive: false });
+canvas.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    touchStart = null;
+    touchCurrent = null;
+}, { passive: false });
+canvas.addEventListener('touchcancel', (e) => {
+    e.preventDefault();
+    touchStart = null;
+    touchCurrent = null;
+}, { passive: false });
+
+// Teclado
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'r' || e.key === 'R') reiniciarJuego();
+    if (pausaMejoras && !gameOver) {
+        if (e.key === '1') aplicarMejora(0);
+        if (e.key === '2') aplicarMejora(1);
+        if (e.key === '3') aplicarMejora(2);
+    }
+});
+
+// --- INICIALIZAR Y EJECUTAR ---
+iniciarOleada();
+
+function loop() {
+    actualizar();
+    dibujar();
+    requestAnimationFrame(loop);
+}
+loop();
+
+console.log('✅ Bloque 2 cargado');
+</script>
+  
